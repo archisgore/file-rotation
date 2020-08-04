@@ -1,13 +1,17 @@
 [package]
-name = "file-rotate"
-version = "0.2.0"
-authors = ["Kevin Robert Stravers <macocio@gmail.com>"]
+name = "file-rotate-record-boundary"
+version = "0.3.0"
+authors = ["Archis Gore <archis@polyverse.com>"]
 edition = "2018"
-description = "Log rotation for files"
-homepage = "https://github.com/BourgondAries/file-rotate"
-repository = "https://github.com/BourgondAries/file-rotate"
+homepage = "https://github.com/polyverse/file-rotate"
+repository = "https://github.com/polyverse/file-rotate"
 keywords= ["log", "rotate", "logrotate"]
 license = "LGPL-3.0-or-later"
+description = """
+Please see 'file-rotate' instead. (
+This is a fork with changes needed by Polyverse until the upstream PR has been marged.
+https://github.com/BourgondAries/file-rotate/pull/3
+"""
 
 [dev-dependencies]
 quickcheck = "0.9"
