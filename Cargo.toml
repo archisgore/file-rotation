@@ -21,3 +21,4 @@ tokio = { version = "0.3.6", features = ["rt-multi-thread", "macros", "time", "f
 [dev-dependencies]
 quickcheck = "0.9"
 quickcheck_macros = "0.9"
+assert_matches = "1.4.0"

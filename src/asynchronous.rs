@@ -1,138 +1,14 @@
-//! Write output to a file and rotate the files when limits have been exceeded.
-//!
-//! Defines a simple [std::io::Write] object that you can plug into your writers as middleware.
-//!
-//! # Rotating by Lines #
-//!
-//! We can rotate log files by using the amount of lines as a limit.
-//!
-//! ```
-//! use file_rotate::{FileRotate, RotationMode};
-//! use std::{fs, io::Write};
-//!
-//! // Create a directory to store our logs, this is not strictly needed but shows how we can
-//! // arbitrary paths.
-//! fs::create_dir("target/my-log-directory-lines");
-//!
-//! // Create a new log writer. The first argument is anything resembling a path. The
-//! // basename is used for naming the log files.
-//! //
-//! // Here we choose to limit logs by 10 lines, and have at most 2 rotated log files. This
-//! // makes the total amount of log files 4, since the original file is present as well as
-//! // file 0.
-//! let mut log = FileRotate::new("target/my-log-directory-lines/my-log-file", RotationMode::Lines(3), 2);
-//!
-//! // Write a bunch of lines
-//! writeln!(log, "Line 1: Hello World!");
-//! for idx in 2..11 {
-//!     writeln!(log, "Line {}", idx);
-//! }
-//!
-//! assert_eq!("Line 10\n", fs::read_to_string("target/my-log-directory-lines/my-log-file").unwrap());
-//!
-//! assert_eq!("Line 1: Hello World!\nLine 2\nLine 3\n", fs::read_to_string("target/my-log-directory-lines/my-log-file.0").unwrap());
-//! assert_eq!("Line 4\nLine 5\nLine 6\n", fs::read_to_string("target/my-log-directory-lines/my-log-file.1").unwrap());
-//! assert_eq!("Line 7\nLine 8\nLine 9\n", fs::read_to_string("target/my-log-directory-lines/my-log-file.2").unwrap());
-//!
-//! fs::remove_dir_all("target/my-log-directory-lines");
-//! ```
-//!
-//! # Rotating by Bytes #
-//!
-//! Another method of rotation is by bytes instead of lines.
-//!
-//! ```
-//! use file_rotate::{FileRotate, RotationMode};
-//! use std::{fs, io::Write};
-//!
-//! fs::create_dir("target/my-log-directory-bytes");
-//!
-//! let mut log = FileRotate::new("target/my-log-directory-bytes/my-log-file", RotationMode::Bytes(5), 2);
-//!
-//! writeln!(log, "Test file");
-//!
-//! assert_eq!("Test ", fs::read_to_string("target/my-log-directory-bytes/my-log-file.0").unwrap());
-//! assert_eq!("file\n", fs::read_to_string("target/my-log-directory-bytes/my-log-file").unwrap());
-//!
-//! fs::remove_dir_all("target/my-log-directory-bytes");
-//! ```
-//!
-//! # Rotation Method #
-//!
-//! The rotation method used is to always write to the base path, and then move the file to a new
-//! location when the limit is exceeded. The moving occurs in the sequence 0, 1, 2, n, 0, 1, 2...
-//!
-//! Here's an example with 1 byte limits:
-//!
-//! ```
-//! use file_rotate::{FileRotate, RotationMode};
-//! use std::{fs, io::Write};
-//!
-//! fs::create_dir("target/my-log-directory-small");
-//!
-//! let mut log = FileRotate::new("target/my-log-directory-small/my-log-file", RotationMode::Bytes(1), 3);
-//!
-//! write!(log, "A");
-//! assert_eq!("A", fs::read_to_string("target/my-log-directory-small/my-log-file").unwrap());
-//!
-//! write!(log, "B");
-//! assert_eq!("A", fs::read_to_string("target/my-log-directory-small/my-log-file.0").unwrap());
-//! assert_eq!("B", fs::read_to_string("target/my-log-directory-small/my-log-file").unwrap());
-//!
-//! write!(log, "C");
-//! assert_eq!("A", fs::read_to_string("target/my-log-directory-small/my-log-file.0").unwrap());
-//! assert_eq!("B", fs::read_to_string("target/my-log-directory-small/my-log-file.1").unwrap());
-//! assert_eq!("C", fs::read_to_string("target/my-log-directory-small/my-log-file").unwrap());
-//!
-//! write!(log, "D");
-//! assert_eq!("A", fs::read_to_string("target/my-log-directory-small/my-log-file.0").unwrap());
-//! assert_eq!("B", fs::read_to_string("target/my-log-directory-small/my-log-file.1").unwrap());
-//! assert_eq!("C", fs::read_to_string("target/my-log-directory-small/my-log-file.2").unwrap());
-//! assert_eq!("D", fs::read_to_string("target/my-log-directory-small/my-log-file").unwrap());
-//!
-//! write!(log, "E");
-//! assert_eq!("A", fs::read_to_string("target/my-log-directory-small/my-log-file.0").unwrap());
-//! assert_eq!("B", fs::read_to_string("target/my-log-directory-small/my-log-file.1").unwrap());
-//! assert_eq!("C", fs::read_to_string("target/my-log-directory-small/my-log-file.2").unwrap());
-//! assert_eq!("D", fs::read_to_string("target/my-log-directory-small/my-log-file.3").unwrap());
-//! assert_eq!("E", fs::read_to_string("target/my-log-directory-small/my-log-file").unwrap());
-//!
-//!
-//! // Here we overwrite the 0 file since we're out of log files, restarting the sequencing
-//! write!(log, "F");
-//! assert_eq!("E", fs::read_to_string("target/my-log-directory-small/my-log-file.0").unwrap());
-//! assert_eq!("B", fs::read_to_string("target/my-log-directory-small/my-log-file.1").unwrap());
-//! assert_eq!("C", fs::read_to_string("target/my-log-directory-small/my-log-file.2").unwrap());
-//! assert_eq!("D", fs::read_to_string("target/my-log-directory-small/my-log-file.3").unwrap());
-//! assert_eq!("F", fs::read_to_string("target/my-log-directory-small/my-log-file").unwrap());
-//!
-//! fs::remove_dir_all("target/my-log-directory-small");
-//! ```
-//!
-//! # Filesystem Errors #
-//!
-//! If the directory containing the logs is deleted or somehow made inaccessible then the rotator
-//! will simply continue operating without fault. When a rotation occurs, it attempts to open a
-//! file in the directory. If it can, it will just continue logging. If it can't then the written
-//! date is sent to the void.
-//!
-//! This logger never panics.
-#![deny(
-    missing_docs,
-    trivial_casts,
-    trivial_numeric_casts,
-    unsafe_code,
-    unused_import_braces,
-    unused_qualifications
-)]
-
+use core::pin::Pin;
+use futures::task::{Context, Poll};
+use std::path::{Path, PathBuf};
 use tokio::{
     fs::{self, File},
     io::{self, AsyncWrite},
 };
-use std::path::{Path, PathBuf};
 
 // ---
+
+type Result<T> = std::result::Result<T, error::Error>;
 
 /// Condition on which a file is rotated.
 pub enum RotationMode {
@@ -169,16 +45,16 @@ impl FileRotate {
         path: P,
         rotation_mode: RotationMode,
         max_file_number: usize,
-    ) -> Self {
+    ) -> Result<Self> {
         match rotation_mode {
-            RotationMode::Bytes(bytes) => {
-                assert!(bytes > 0);
+            RotationMode::Bytes(bytes) if bytes == 0 => {
+                return Err(error::Error::ZeroBytes);
             }
-            RotationMode::Lines(lines) => {
-                assert!(lines > 0);
+            RotationMode::Lines(lines) if lines == 0 => {
+                return Err(error::Error::ZeroLines);
             }
-            RotationMode::BytesSurpassed(bytes) => {
-                assert!(bytes > 0);
+            RotationMode::BytesSurpassed(bytes) if bytes == 0 => {
+                return Err(error::Error::ZeroBytes);
             }
         };
 
@@ -188,7 +64,8 @@ impl FileRotate {
             file: match File::create(&path) {
                 Ok(file) => Some(file),
                 Err(_) => None,
-            }.await,
+            }
+            .await,
             file_number: 0,
             max_file_number,
             mode: rotation_mode,
@@ -212,7 +89,11 @@ impl FileRotate {
 }
 
 impl AsyncWrite for FileRotate {
-    fn poll_write(&mut selfPin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, Error>> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
         let written = buf.len();
         match self.mode {
             RotationMode::Bytes(bytes) => {
@@ -264,7 +145,7 @@ impl AsyncWrite for FileRotate {
         Ok(written)
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         if let Some(Err(err)) = self.file.as_mut().map(|file| file.flush()) {
             Err(err)
         } else {
