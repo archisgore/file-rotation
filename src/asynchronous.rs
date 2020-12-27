@@ -487,7 +487,7 @@ mod tests {
                 FileRotate::new("target/async_zero_bytes", RotationMode::Bytes(0), 0).await;
             if let Err(error::Error::ZeroBytes) = zerobyteserr {
             } else {
-                assert!(false, "Expected Error::ZeroBytes");
+                panic!("Expected Error::ZeroBytes");
             };
         })
     }
@@ -503,7 +503,7 @@ mod tests {
             .await;
             if let Err(error::Error::ZeroBytes) = zerobyteserr {
             } else {
-                assert!(false, "Expected Error::ZeroBytes");
+                panic!("Expected Error::ZeroBytes");
             };
         });
     }
@@ -515,7 +515,7 @@ mod tests {
                 FileRotate::new("target/async_zero_lines", RotationMode::Lines(0), 0).await;
             if let Err(error::Error::ZeroLines) = zerolineserr {
             } else {
-                assert!(false, "Expected Error::ZeroLines");
+                panic!("Expected Error::ZeroLines");
             };
         });
     }
@@ -529,7 +529,7 @@ mod tests {
             let mut rot = FileRotate::new("target/async_rotate/log", RotationMode::Lines(1), 0)
                 .await
                 .unwrap();
-            rot.write("a\n".as_bytes()).await.unwrap();
+            rot.write(b"a\n").await.unwrap();
             assert_eq!(
                 "",
                 fs::read_to_string("target/async_rotate/log").await.unwrap()
@@ -543,20 +543,20 @@ mod tests {
 
             fs::remove_dir_all("target/async_rotate").await.unwrap();
 
-            assert!(rot.write("b\n".as_bytes()).await.is_err());
+            assert!(rot.write(b"b\n").await.is_err());
 
             rot.flush().await.unwrap();
             assert!(fs::read_dir("target/async_rotate").await.is_err());
 
             fs::create_dir("target/async_rotate").await.unwrap();
 
-            rot.write("c\n".as_bytes()).await.unwrap();
+            rot.write(b"c\n").await.unwrap();
             assert_eq!(
                 "",
                 fs::read_to_string("target/async_rotate/log").await.unwrap()
             );
 
-            rot.write("d\n".as_bytes()).await.unwrap();
+            rot.write(b"d\n").await.unwrap();
             assert_eq!(
                 "",
                 fs::read_to_string("target/async_rotate/log").await.unwrap()
@@ -584,14 +584,14 @@ mod tests {
             .await
             .unwrap();
 
-            rot.write("0123456789".as_bytes()).await.unwrap();
+            rot.write(b"0123456789").await.unwrap();
             rot.flush().await.unwrap();
             assert!(Path::new("target/surpassed_bytes/log.0").exists());
             // shouldn't exist yet - because entire record was written in one shot
             assert!(!Path::new("target/surpassed_bytes/log.1").exists());
 
             // This should create the second file
-            rot.write("0123456789".as_bytes()).await.unwrap();
+            rot.write(b"0123456789").await.unwrap();
             rot.flush().await.unwrap();
             assert!(Path::new("target/surpassed_bytes/log.1").exists());
 
@@ -612,12 +612,12 @@ mod tests {
                     .unwrap();
 
             for _ in 0..count - 1 {
-                rot.write("\n".as_bytes()).await.unwrap();
+                rot.write(b"\n").await.unwrap();
             }
 
             rot.flush().await.unwrap();
             assert!(!Path::new("target/arbitrary_lines/log.0").exists());
-            rot.write("\n".as_bytes()).await.unwrap();
+            rot.write(b"\n").await.unwrap();
             assert!(Path::new("target/arbitrary_lines/log.0").exists());
 
             fs::remove_dir_all("target/arbitrary_lines").await.unwrap();
@@ -642,12 +642,12 @@ mod tests {
             .unwrap();
 
             for _ in 0..count {
-                rot.write("0".as_bytes()).await.unwrap();
+                rot.write(b"0").await.unwrap();
             }
 
             rot.flush().await.unwrap();
             assert!(!Path::new("target/async_arbitrary_bytes/log.0").exists());
-            rot.write("1".as_bytes()).await.unwrap();
+            rot.write(b"1").await.unwrap();
             assert!(Path::new("target/async_arbitrary_bytes/log.0").exists());
 
             fs::remove_dir_all("target/async_arbitrary_bytes")

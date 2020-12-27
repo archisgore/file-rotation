@@ -321,7 +321,7 @@ mod tests {
             FileRotate::new("target/zero_bytes", RotationMode::Bytes(0), 0).unwrap_err();
         if let error::Error::ZeroBytes = zerobyteserr {
         } else {
-            assert!(false, "Expected Error::ZeroBytes");
+            panic!("Expected Error::ZeroBytes");
         };
     }
 
@@ -331,7 +331,7 @@ mod tests {
             FileRotate::new("target/zero_bytes", RotationMode::BytesSurpassed(0), 0).unwrap_err();
         if let error::Error::ZeroBytes = zerobyteserr {
         } else {
-            assert!(false, "Expected Error::ZeroBytes");
+            panic!("Expected Error::ZeroBytes");
         };
     }
 
@@ -341,7 +341,7 @@ mod tests {
             FileRotate::new("target/zero_lines", RotationMode::Lines(0), 0).unwrap_err();
         if let error::Error::ZeroLines = zerolineserr {
         } else {
-            assert!(false, "Expected Error::ZeroLines");
+            panic!("Expected Error::ZeroLines");
         };
     }
 
