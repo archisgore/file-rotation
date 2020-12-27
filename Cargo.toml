@@ -1,11 +1,11 @@
 [package]
-name = "file-rotate"
+name = "polyverse-file-rotate"
 version = "0.3.0"
-authors = ["Kevin Robert Stravers <macocio@gmail.com>"]
+authors = ["Kevin Robert Stravers <macocio@gmail.com>", "Archis Gore <archis@polyverse.com"]
 edition = "2018"
 description = "Log rotation for files"
-homepage = "https://github.com/BourgondAries/file-rotate"
-repository = "https://github.com/BourgondAries/file-rotate"
+homepage = "https://github.com/polyverse/file-rotate"
+repository = "https://github.com/polyverse/file-rotate"
 keywords= ["log", "rotate", "logrotate"]
 license = "LGPL-3.0-or-later"
 
