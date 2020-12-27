@@ -1,5 +1,5 @@
 [package]
-name = "file-rotator"
+name = "file-rotation"
 version = "0.3.0"
 authors = ["Kevin Robert Stravers <macocio@gmail.com>", "Archis Gore <archis@polyverse.com"]
 edition = "2018"
