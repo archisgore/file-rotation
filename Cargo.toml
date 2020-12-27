@@ -1,9 +1,9 @@
 [package]
-name = "polyverse-file-rotate"
+name = "file-rotator"
 version = "0.3.0"
 authors = ["Kevin Robert Stravers <macocio@gmail.com>", "Archis Gore <archis@polyverse.com"]
 edition = "2018"
-description = "Log rotation for files"
+description = "Log rotation for files, supports synchronous std API and an asynchronous tokio-based API."
 homepage = "https://github.com/polyverse/file-rotate"
 repository = "https://github.com/polyverse/file-rotate"
 keywords= ["log", "rotate", "logrotate"]
