@@ -1,3 +1,4 @@
+use crate::error;
 use core::pin::Pin;
 use futures::task::{Context, Poll};
 use std::path::{Path, PathBuf};
@@ -24,7 +25,7 @@ pub enum RotationMode {
 pub struct FileRotate {
     basename: PathBuf,
     count: usize,
-    file: Option<File>,
+    file: Pin<Box<File>>,
     file_number: usize,
     max_file_number: usize,
     mode: RotationMode,
@@ -56,20 +57,17 @@ impl FileRotate {
             RotationMode::BytesSurpassed(bytes) if bytes == 0 => {
                 return Err(error::Error::ZeroBytes);
             }
+            _ => {}
         };
 
-        Self {
+        Ok(Self {
             basename: path.as_ref().to_path_buf(),
             count: 0,
-            file: match File::create(&path) {
-                Ok(file) => Some(file),
-                Err(_) => None,
-            }
-            .await,
+            file: Box::pin(File::create(&path).await?),
             file_number: 0,
             max_file_number,
             mode: rotation_mode,
-        }
+        })
     }
 
     async fn rotate(&mut self) -> io::Result<()> {
@@ -79,7 +77,7 @@ impl FileRotate {
         let _ = self.file.take();
 
         let _ = fs::rename(&self.basename, path);
-        self.file = Some(File::create(&self.basename).await?);
+        self.file = Some(Box::pin(File::create(&self.basename).await?));
 
         self.file_number = (self.file_number + 1) % (self.max_file_number + 1);
         self.count = 0;
@@ -94,63 +92,22 @@ impl AsyncWrite for FileRotate {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        let written = buf.len();
-        match self.mode {
-            RotationMode::Bytes(bytes) => {
-                while self.count + buf.len() > bytes {
-                    let bytes_left = bytes - self.count;
-                    if let Some(Err(err)) = self
-                        .file
-                        .as_mut()
-                        .map(|file| file.write(&buf[..bytes_left]))
-                    {
-                        return Err(err);
-                    }
-                    self.rotate()?;
-                    buf = &buf[bytes_left..];
-                }
-                self.count += buf.len();
-                if let Some(Err(err)) = self.file.as_mut().map(|file| file.write(&buf[..])) {
-                    return Err(err);
-                }
-            }
-            RotationMode::Lines(lines) => {
-                while let Some((idx, _)) = buf.iter().enumerate().find(|(_, byte)| *byte == &b'\n')
-                {
-                    if let Some(Err(err)) =
-                        self.file.as_mut().map(|file| file.write(&buf[..idx + 1]))
-                    {
-                        return Err(err);
-                    }
-                    self.count += 1;
-                    buf = &buf[idx + 1..];
-                    if self.count >= lines {
-                        self.rotate()?;
-                    }
-                }
-                if let Some(Err(err)) = self.file.as_mut().map(|file| file.write(buf)) {
-                    return Err(err);
-                }
-            }
-            RotationMode::BytesSurpassed(bytes) => {
-                if let Some(Err(err)) = self.file.as_mut().map(|file| file.write(&buf)) {
-                    return Err(err);
-                }
-                self.count += buf.len();
-                if self.count > bytes {
-                    self.rotate()?
-                }
-            }
-        }
-        Ok(written)
+        // pass write down to the current file
+        self.file
+            .as_mut()
+            .map(|file| file.as_mut().poll_write(cx, buf))
     }
 
+    // pass flush down to the current file
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        if let Some(Err(err)) = self.file.as_mut().map(|file| file.flush()) {
-            Err(err)
-        } else {
-            Ok(())
-        }
+        self.file.as_mut().map(|file| file.as_mut().poll_flush(cx))
+    }
+
+    // pass shutdown down to the current file
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        self.file
+            .as_mut()
+            .map(|file| file.as_mut().poll_shutdown(cx))
     }
 }
 
@@ -159,21 +116,33 @@ mod tests {
     use super::*;
 
     #[test]
-    #[should_panic(expected = "assertion failed: bytes > 0")]
     fn zero_bytes() {
-        let mut rot = FileRotate::new("target/zero_bytes", RotationMode::Bytes(0), 0);
-        writeln!(rot, "Zero").unwrap();
-        assert_eq!("\n", fs::read_to_string("target/zero_bytes").unwrap());
-        assert_eq!("o", fs::read_to_string("target/zero_bytes.0").unwrap());
+        let zerobyteserr =
+            FileRotate::new("target/zero_bytes", RotationMode::Bytes(0), 0).unwrap_err();
+        if let error::Error::ZeroBytes = zerobyteserr {
+        } else {
+            assert!(false, "Expected Error::ZeroBytes");
+        };
     }
 
     #[test]
-    #[should_panic(expected = "assertion failed: lines > 0")]
+    fn zero_bytes_surpassed() {
+        let zerobyteserr =
+            FileRotate::new("target/zero_bytes", RotationMode::BytesSurpassed(0), 0).unwrap_err();
+        if let error::Error::ZeroBytes = zerobyteserr {
+        } else {
+            assert!(false, "Expected Error::ZeroBytes");
+        };
+    }
+
+    #[test]
     fn zero_lines() {
-        let mut rot = FileRotate::new("target/zero_lines", RotationMode::Lines(0), 0);
-        write!(rot, "a\nb\nc\nd\n").unwrap();
-        assert_eq!("", fs::read_to_string("target/zero_lines").unwrap());
-        assert_eq!("d\n", fs::read_to_string("target/zero_lines.0").unwrap());
+        let zerolineserr =
+            FileRotate::new("target/zero_lines", RotationMode::Lines(0), 0).unwrap_err();
+        if let error::Error::ZeroLines = zerolineserr {
+        } else {
+            assert!(false, "Expected Error::ZeroLines");
+        };
     }
 
     #[test]
