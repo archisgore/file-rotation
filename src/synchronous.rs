@@ -37,6 +37,49 @@
 //! fs::remove_dir_all("target/my-log-directory-lines");
 //! ```
 //!
+//! # Rotating by Bytes surpassing a threshold, but without splitting a buffer mid-way#
+//!
+//! We can rotate log files but never splitting a buffer half-way. This means a single buffer may
+//! end up surpassing the number of expected bytes in a file, but that entire buffer will be
+//! written. When the file surpasses the number of bytes to rotate, it'll be rotated for the
+//! next buffer.
+//!
+//! When lines are written in a single buffer as demonstrated below, this ensures the logs
+//! contain complete lines which do not split across files.
+//!
+//! ```
+//! use file_rotate::{FileRotate, RotationMode};
+//! use std::{fs, io::Write};
+//!
+//! // Create a directory to store our logs, this is not strictly needed but shows how we can
+//! // arbitrary paths.
+//! fs::create_dir("target/my-log-directory-lines");
+//!
+//! // Create a new log writer. The first argument is anything resembling a path. The
+//! // basename is used for naming the log files.
+//! //
+//! // Here we choose to limit logs by 10 lines, and have at most 2 rotated log files. This
+//! // makes the total amount of log files 4, since the original file is present as well as
+//! // file 0.
+//! let mut log = FileRotate::new("target/my-log-directory-lines/my-log-file", RotationMode::BytesSurpassed(2), 2).unwrap();
+//!
+//! // Write a bunch of lines
+//! log.write("Line 1: Hello World!\n".as_bytes());
+//! for idx in 2..11 {
+//!     log.write(format!("Line {}", idx).as_bytes());
+//! }
+//!
+//! // the latest file is empty - since the previous file surpassed bytes and was rotated out
+//! assert_eq!("", fs::read_to_string("target/my-log-directory-lines/my-log-file").unwrap());
+//!
+//! assert_eq!("Line 10", fs::read_to_string("target/my-log-directory-lines/my-log-file.0").unwrap());
+//! assert_eq!("Line 8", fs::read_to_string("target/my-log-directory-lines/my-log-file.1").unwrap());
+//! assert_eq!("Line 9", fs::read_to_string("target/my-log-directory-lines/my-log-file.2").unwrap());
+//!
+//! fs::remove_dir_all("target/my-log-directory-lines");
+//! ```
+//!
+//!
 //! # Rotating by Bytes #
 //!
 //! Another method of rotation is by bytes instead of lines.
@@ -209,44 +252,58 @@ impl FileRotate {
 
         Ok(())
     }
+
+    fn write_bytes(&mut self, mut buf: &[u8], bytes: usize) -> io::Result<usize> {
+        let mut written: usize = 0;
+
+        while self.count + buf.len() > bytes {
+            let bytes_left = bytes - self.count;
+            written += self.file.write(&buf[..bytes_left])?;
+            self.rotate()?;
+            buf = &buf[bytes_left..];
+        }
+        written += self.file.write(&buf[..])?;
+        self.count += written;
+
+        Ok(written)
+    }
+
+    fn write_bytes_surpassed(&mut self, buf: &[u8], bytes: usize) -> io::Result<usize> {
+        let mut written: usize = 0;
+
+        written += self.file.write(&buf)?;
+        self.count += written;
+        if self.count > bytes {
+            self.rotate()?
+        }
+
+        Ok(written)
+    }
+
+    fn write_lines(&mut self, mut buf: &[u8], lines: usize) -> io::Result<usize> {
+        let mut written: usize = 0;
+
+        while let Some((idx, _)) = buf.iter().enumerate().find(|(_, byte)| *byte == &b'\n') {
+            written += self.file.write(&buf[..idx + 1])?;
+            self.count += 1;
+            buf = &buf[idx + 1..];
+            if self.count >= lines {
+                self.rotate()?;
+            }
+        }
+        written += self.file.write(buf)?;
+
+        Ok(written)
+    }
 }
 
 impl Write for FileRotate {
-    fn write(&mut self, mut buf: &[u8]) -> io::Result<usize> {
-        // count written as and when we finish downstream writes
-        let mut written: usize = 0;
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self.mode {
-            RotationMode::Bytes(bytes) => {
-                while self.count + buf.len() > bytes {
-                    let bytes_left = bytes - self.count;
-                    written += self.file.write(&buf[..bytes_left])?;
-                    self.rotate()?;
-                    buf = &buf[bytes_left..];
-                }
-                written += self.file.write(&buf[..])?;
-                self.count += written;
-            }
-            RotationMode::Lines(lines) => {
-                while let Some((idx, _)) = buf.iter().enumerate().find(|(_, byte)| *byte == &b'\n')
-                {
-                    written += self.file.write(&buf[..idx + 1])?;
-                    self.count += 1;
-                    buf = &buf[idx + 1..];
-                    if self.count >= lines {
-                        self.rotate()?;
-                    }
-                }
-                written += self.file.write(buf)?;
-            }
-            RotationMode::BytesSurpassed(bytes) => {
-                written += self.file.write(&buf)?;
-                self.count += written;
-                if self.count > bytes {
-                    self.rotate()?
-                }
-            }
+            RotationMode::Bytes(bytes) => self.write_bytes(buf, bytes),
+            RotationMode::Lines(lines) => self.write_lines(buf, lines),
+            RotationMode::BytesSurpassed(bytes) => self.write_bytes_surpassed(buf, bytes),
         }
-        Ok(written)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -378,6 +435,10 @@ mod tests {
         assert!(!Path::new("target/arbitrary_bytes/log.0").exists());
         write!(rot, "1").unwrap();
         assert!(Path::new("target/arbitrary_bytes/log.0").exists());
+        assert_eq!(
+            "0",
+            fs::read_to_string("target/arbitrary_bytes/log.0").unwrap()
+        );
 
         fs::remove_dir_all("target/arbitrary_bytes").unwrap();
     }
