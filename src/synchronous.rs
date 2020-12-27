@@ -20,7 +20,7 @@
 //! // Here we choose to limit logs by 10 lines, and have at most 2 rotated log files. This
 //! // makes the total amount of log files 4, since the original file is present as well as
 //! // file 0.
-//! let mut log = FileRotate::new("target/my-log-directory-lines/my-log-file", RotationMode::Lines(3), 2);
+//! let mut log = FileRotate::new("target/my-log-directory-lines/my-log-file", RotationMode::Lines(3), 2).unwrap();
 //!
 //! // Write a bunch of lines
 //! writeln!(log, "Line 1: Hello World!");
@@ -47,7 +47,7 @@
 //!
 //! fs::create_dir("target/my-log-directory-bytes");
 //!
-//! let mut log = FileRotate::new("target/my-log-directory-bytes/my-log-file", RotationMode::Bytes(5), 2);
+//! let mut log = FileRotate::new("target/my-log-directory-bytes/my-log-file", RotationMode::Bytes(5), 2).unwrap();
 //!
 //! writeln!(log, "Test file");
 //!
@@ -70,7 +70,7 @@
 //!
 //! fs::create_dir("target/my-log-directory-small");
 //!
-//! let mut log = FileRotate::new("target/my-log-directory-small/my-log-file", RotationMode::Bytes(1), 3);
+//! let mut log = FileRotate::new("target/my-log-directory-small/my-log-file", RotationMode::Bytes(1), 3).unwrap();
 //!
 //! write!(log, "A");
 //! assert_eq!("A", fs::read_to_string("target/my-log-directory-small/my-log-file").unwrap());
@@ -136,6 +136,7 @@ use std::{
 type Result<T> = std::result::Result<T, error::Error>;
 
 /// Condition on which a file is rotated.
+#[derive(Debug)]
 pub enum RotationMode {
     /// Cut the log at the exact size in bytes.
     Bytes(usize),
@@ -146,6 +147,7 @@ pub enum RotationMode {
 }
 
 /// The main writer used for rotating logs.
+#[derive(Debug)]
 pub struct FileRotate {
     basename: PathBuf,
     count: usize,
@@ -277,20 +279,32 @@ mod tests {
 
     #[test]
     fn zero_bytes() {
-        let zerobyteserr = FileRotate::new("target/zero_bytes", RotationMode::Bytes(0), 0).unwrap_err();
-        assert_matches!(error::Error::ZeroBytes, zerobyteserr);
+        let zerobyteserr =
+            FileRotate::new("target/zero_bytes", RotationMode::Bytes(0), 0).unwrap_err();
+        if let error::Error::ZeroBytes = zerobyteserr {
+        } else {
+            assert!(false, "Expected Error::ZeroBytes");
+        };
     }
 
     #[test]
     fn zero_bytes_surpassed() {
-        let zerobyteserr = FileRotate::new("target/zero_bytes", RotationMode::BytesSurpassed(0), 0).unwrap_err();
-        assert_matches!(error::Error::ZeroBytes, zerobyteserr);
+        let zerobyteserr =
+            FileRotate::new("target/zero_bytes", RotationMode::BytesSurpassed(0), 0).unwrap_err();
+        if let error::Error::ZeroBytes = zerobyteserr {
+        } else {
+            assert!(false, "Expected Error::ZeroBytes");
+        };
     }
 
     #[test]
     fn zero_lines() {
-        let zerolineserr = FileRotate::new("target/zero_lines", RotationMode::Lines(0), 0).unwrap_err();
-        assert_matches!(error::Error::ZeroLines, zerolineserr);
+        let zerolineserr =
+            FileRotate::new("target/zero_lines", RotationMode::Lines(0), 0).unwrap_err();
+        if let error::Error::ZeroLines = zerolineserr {
+        } else {
+            assert!(false, "Expected Error::ZeroLines");
+        };
     }
 
     #[test]
@@ -328,7 +342,8 @@ mod tests {
             "target/surpassed_bytes/log",
             RotationMode::BytesSurpassed(1),
             1,
-        ).unwrap();
+        )
+        .unwrap();
 
         write!(rot, "0123456789").unwrap();
         rot.flush().unwrap();
@@ -350,7 +365,8 @@ mod tests {
         fs::create_dir("target/arbitrary_lines").unwrap();
 
         let count = count.max(1);
-        let mut rot = FileRotate::new("target/arbitrary_lines/log", RotationMode::Lines(count), 0).unwrap();
+        let mut rot =
+            FileRotate::new("target/arbitrary_lines/log", RotationMode::Lines(count), 0).unwrap();
 
         for _ in 0..count - 1 {
             writeln!(rot).unwrap();
@@ -370,7 +386,8 @@ mod tests {
         fs::create_dir("target/arbitrary_bytes").unwrap();
 
         let count = 0.max(1);
-        let mut rot = FileRotate::new("target/arbitrary_bytes/log", RotationMode::Bytes(count), 0).unwrap();
+        let mut rot =
+            FileRotate::new("target/arbitrary_bytes/log", RotationMode::Bytes(count), 0).unwrap();
 
         for _ in 0..count {
             write!(rot, "0").unwrap();
