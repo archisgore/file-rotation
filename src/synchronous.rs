@@ -7,7 +7,7 @@
 //! We can rotate log files by using the amount of lines as a limit.
 //!
 //! ```
-//! use file_rotate::{FileRotate, RotationMode};
+//! use file_rotation::{FileRotate, RotationMode};
 //! use std::{fs, io::Write};
 //!
 //! // Create a directory to store our logs, this is not strictly needed but shows how we can
@@ -48,7 +48,7 @@
 //! contain complete lines which do not split across files.
 //!
 //! ```
-//! use file_rotate::{FileRotate, RotationMode};
+//! use file_rotation::{FileRotate, RotationMode};
 //! use std::{fs, io::Write};
 //!
 //! // Create a directory to store our logs, this is not strictly needed but shows how we can
@@ -85,7 +85,7 @@
 //! Another method of rotation is by bytes instead of lines.
 //!
 //! ```
-//! use file_rotate::{FileRotate, RotationMode};
+//! use file_rotation::{FileRotate, RotationMode};
 //! use std::{fs, io::Write};
 //!
 //! fs::create_dir("target/my-log-directory-bytes");
@@ -108,7 +108,7 @@
 //! Here's an example with 1 byte limits:
 //!
 //! ```
-//! use file_rotate::{FileRotate, RotationMode};
+//! use file_rotation::{FileRotate, RotationMode};
 //! use std::{fs, io::Write};
 //!
 //! fs::create_dir("target/my-log-directory-small");

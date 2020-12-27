@@ -7,7 +7,7 @@
 //! We can rotate log files by using the amount of lines as a limit.
 //!
 //! ```
-//! use file_rotate::{FileRotate, RotationMode};
+//! use file_rotation::{FileRotate, RotationMode};
 //! use tokio::{fs, io::AsyncWriteExt};
 //!
 //! tokio_test::block_on(async {
@@ -51,7 +51,7 @@
 //! contain complete lines which do not split across files.
 //!
 //! ```
-//! use file_rotate::{FileRotate, RotationMode};
+//! use file_rotation::{FileRotate, RotationMode};
 //! use tokio::{fs, io::AsyncWriteExt};
 //!
 //! tokio_test::block_on(async {
@@ -91,7 +91,7 @@
 //! Another method of rotation is by bytes instead of lines.
 //!
 //! ```
-//! use file_rotate::{FileRotate, RotationMode};
+//! use file_rotation::{FileRotate, RotationMode};
 //! use tokio::{fs, io::AsyncWriteExt};
 //!
 //! tokio_test::block_on(async {
@@ -116,7 +116,7 @@
 //! Here's an example with 1 byte limits:
 //!
 //! ```
-//! use file_rotate::{FileRotate, RotationMode};
+//! use file_rotation::{FileRotate, RotationMode};
 //! use tokio::{fs, io::AsyncWriteExt};
 //!
 //! tokio_test::block_on(async {
@@ -185,6 +185,7 @@ use tokio::{
 type Result<T> = std::result::Result<T, error::Error>;
 
 pub enum RotateState {
+    PendingFlush,
     PendingRename(Pin<Box<dyn Future<Output = io::Result<()>>>>),
     PendingCreate(Pin<Box<dyn Future<Output = io::Result<fs::File>>>>),
     Done,
@@ -211,7 +212,6 @@ pub struct FileRotate {
 
     //transient stuff used by poll
     written: usize,
-    buf_to_write: Option<Vec<u8>>,
     rotate_state: RotateState,
 }
 
@@ -253,22 +253,42 @@ impl FileRotate {
             mode: rotation_mode,
 
             written: 0,
-            buf_to_write: None,
             rotate_state: RotateState::Done,
         })
+    }
+
+    fn reset(self: &mut Pin<&mut Self>) {
+        self.written = 0;
+        self.rotate_state = RotateState::Done;
     }
 
     fn poll_rotate(self: &mut Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match self.rotate_state {
             RotateState::Done => {
+                eprintln!("!!!!! PollRotate:Initializing (Starting Flush)");
                 // if called when done, start rotation...
-                let basename = self.basename.clone();
-                let mut path = self.basename.clone();
-                path.set_extension(self.file_number.to_string());
-                self.rotate_state =
-                    RotateState::PendingRename(Box::pin(fs::rename(basename, path)));
+                // don't pin-box-store future that captures self - let the next state call
+                // poll directly
+                self.rotate_state = RotateState::PendingFlush;
                 self.poll_rotate(cx)
             }
+            RotateState::PendingFlush => match self.file.as_mut().poll_flush(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Err(e)) => {
+                    eprintln!("!!!!! PollRotate:CompletedFlush (Error: {:?})", e);
+                    self.rotate_state = RotateState::Done;
+                    Poll::Ready(Err(e))
+                }
+                Poll::Ready(Ok(())) => {
+                    eprintln!("!!!!! PollRotate:CompletedFlush (Starting Rename)");
+                    let basename = self.basename.clone();
+                    let mut path = self.basename.clone();
+                    path.set_extension(self.file_number.to_string());
+                    self.rotate_state =
+                        RotateState::PendingRename(Box::pin(fs::rename(basename, path)));
+                    self.poll_rotate(cx)
+                }
+            },
             RotateState::PendingRename(ref mut rename_future) => {
                 match rename_future.as_mut().poll(cx) {
                     Poll::Pending => Poll::Pending,
@@ -276,6 +296,7 @@ impl FileRotate {
                     // Logic from synchronous side - ignore rename errors
                     // so long as create succeeds, logging continues...
                     Poll::Ready(Err(_)) | Poll::Ready(Ok(())) => {
+                        eprintln!("!!!!! PollRotate:CompletedRename (Starting Create)");
                         let basename = self.basename.clone();
                         self.rotate_state =
                             RotateState::PendingCreate(Box::pin(File::create(basename)));
@@ -287,10 +308,12 @@ impl FileRotate {
                 match create_future.as_mut().poll(cx) {
                     Poll::Pending => Poll::Pending,
                     Poll::Ready(Err(e)) => {
+                        eprintln!("!!!!! PollRotate:CompletedCreate (Error: {:?})", e);
                         self.rotate_state = RotateState::Done;
                         Poll::Ready(Err(e))
                     }
                     Poll::Ready(Ok(file)) => {
+                        eprintln!("!!!!! PollRotate:CompletedCreate Ok");
                         self.file = Box::pin(file);
                         self.file_number = (self.file_number + 1) % (self.max_file_number + 1);
                         self.count = 0;
@@ -305,15 +328,16 @@ impl FileRotate {
     fn poll_write_bytes(
         self: &mut Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf_to_write: &mut Vec<u8>,
+        complete_buf: &[u8],
         bytes: usize,
     ) -> Poll<io::Result<bool>> {
-        let (subbuf, used, should_rotate) = if self.count + buf_to_write.len() > bytes {
+        let buf_to_write = &complete_buf[self.written..];
+        let (subbuf, should_rotate) = if self.count + buf_to_write.len() > bytes {
             // got more to write than allowed?
             let bytes_left = bytes - self.count;
-            (&buf_to_write[..bytes_left], bytes_left, true)
+            (&buf_to_write[..bytes_left], true)
         } else {
-            (&buf_to_write[..], buf_to_write.len(), false)
+            (&buf_to_write[..], false)
         };
 
         match self.file.as_mut().poll_write(cx, subbuf) {
@@ -322,7 +346,6 @@ impl FileRotate {
             Poll::Ready(Ok(w)) => {
                 self.written += w;
                 self.count += w;
-                buf_to_write.drain(..used);
                 Poll::Ready(Ok(should_rotate))
             }
         }
@@ -331,16 +354,16 @@ impl FileRotate {
     fn poll_write_bytes_surpassed(
         self: &mut Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf_to_write: &mut Vec<u8>,
+        complete_buf: &[u8],
         bytes: usize,
     ) -> Poll<io::Result<bool>> {
+        let buf_to_write = &complete_buf[self.written..];
         match self.file.as_mut().poll_write(cx, buf_to_write) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
             Poll::Ready(Ok(w)) => {
                 self.written += w;
                 self.count += w;
-                buf_to_write.clear();
                 let should_rotate = self.count > bytes;
                 Poll::Ready(Ok(should_rotate))
             }
@@ -350,17 +373,18 @@ impl FileRotate {
     fn poll_write_lines(
         self: &mut Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf_to_write: &mut Vec<u8>,
+        complete_buf: &[u8],
         lines: usize,
     ) -> Poll<io::Result<bool>> {
-        let (subbuf, used) = if let Some((idx, _)) = buf_to_write
+        let buf_to_write = &complete_buf[self.written..];
+        let subbuf = if let Some((idx, _)) = buf_to_write
             .iter()
             .enumerate()
             .find(|(_, byte)| *byte == &b'\n')
         {
-            (&buf_to_write[..idx + 1], idx + 1)
+            &buf_to_write[..idx + 1]
         } else {
-            (&buf_to_write[..], buf_to_write.len())
+            &buf_to_write
         };
 
         match self.file.as_mut().poll_write(cx, subbuf) {
@@ -369,7 +393,6 @@ impl FileRotate {
             Poll::Ready(Ok(w)) => {
                 self.written += w;
                 self.count += 1;
-                buf_to_write.drain(..used);
                 let should_rotate = self.count >= lines;
                 Poll::Ready(Ok(should_rotate))
             }
@@ -386,61 +409,58 @@ impl AsyncWrite for FileRotate {
         // are we waiting on a rotation future? Handle it
         match self.rotate_state {
             RotateState::Done => {
-                // not rotating
+                // when not rotating... fall through/continue
             }
             _ => match self.poll_rotate(cx) {
                 Poll::Pending => return Poll::Pending,
-                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Ready(Err(e)) => {
+                    self.reset();
+                    return Poll::Ready(Err(e));
+                }
                 Poll::Ready(Ok(())) => {
-                    // rotation just completed
+                    // when rotation done... fall through/continue
                 }
             },
         }
 
-        // Got a buffer to be written?
-        if let Some(mut buf_to_write) = self.buf_to_write.take() {
-            // Is it done? Finish everything up.
-            if buf_to_write.is_empty() {
-                self.buf_to_write = None;
-                Poll::Ready(Ok(self.written))
-            } else {
-                let poll_write_result = match self.mode {
-                    RotationMode::Bytes(bytes) => {
-                        self.poll_write_bytes(cx, &mut buf_to_write, bytes)
-                    }
-                    RotationMode::Lines(lines) => {
-                        self.poll_write_lines(cx, &mut buf_to_write, lines)
-                    }
-                    RotationMode::BytesSurpassed(bytes) => {
-                        self.poll_write_bytes_surpassed(cx, &mut buf_to_write, bytes)
-                    }
-                };
+        // Is it done? Finish everything up.
+        if buf.len() == self.written {
+            self.reset();
+            return Poll::Ready(Ok(self.written));
+        }
 
-                match poll_write_result {
-                    Poll::Pending => Poll::Pending,
-                    Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-                    Poll::Ready(Ok(should_rotate)) => {
-                        // hold remaining for next round
-                        self.buf_to_write = Some(buf_to_write);
+        let poll_write_result = match self.mode {
+            RotationMode::Bytes(bytes) => self.poll_write_bytes(cx, buf, bytes),
+            RotationMode::Lines(lines) => self.poll_write_lines(cx, buf, lines),
+            RotationMode::BytesSurpassed(bytes) => self.poll_write_bytes_surpassed(cx, buf, bytes),
+        };
 
-                        if should_rotate {
-                            match self.poll_rotate(cx) {
-                                Poll::Pending => Poll::Pending,
-                                Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-                                Poll::Ready(Ok(())) => self.poll_write(cx, buf),
-                            }
-                        } else {
-                            self.poll_write(cx, buf)
+        match poll_write_result {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Err(e)) => {
+                self.reset();
+                Poll::Ready(Err(e))
+            }
+            Poll::Ready(Ok(should_rotate)) => {
+                if should_rotate {
+                    eprintln!(
+                        "!!!!! Rotation:Started (Buf Len: {}, Count: {}, Written: {})",
+                        buf.len(),
+                        self.count,
+                        self.written
+                    );
+                    match self.poll_rotate(cx) {
+                        Poll::Pending => return Poll::Pending,
+                        Poll::Ready(Err(e)) => {
+                            self.reset();
+                            return Poll::Ready(Err(e));
                         }
+                        Poll::Ready(Ok(())) => {}
                     }
                 }
+
+                self.poll_write(cx, buf)
             }
-        } else {
-            // if no buffer-write in progress, set it up
-            self.written = 0;
-            // copy the entire buffer...
-            self.buf_to_write = Some(Vec::from(buf));
-            self.poll_write(cx, buf)
         }
     }
 
@@ -527,25 +547,22 @@ mod tests {
 
             rot.flush().await.unwrap();
             assert!(fs::read_dir("target/async_rotate").await.is_err());
+
             fs::create_dir("target/async_rotate").await.unwrap();
 
-            // async write may not have completed
             rot.write("c\n".as_bytes()).await.unwrap();
+            assert_eq!(
+                "",
+                fs::read_to_string("target/async_rotate/log").await.unwrap()
+            );
 
-            // Give it one more character not have completed
             rot.write("d\n".as_bytes()).await.unwrap();
             assert_eq!(
                 "",
                 fs::read_to_string("target/async_rotate/log").await.unwrap()
             );
-
-            rot.write("e\n".as_bytes()).await.unwrap();
             assert_eq!(
-                "",
-                fs::read_to_string("target/async_rotate/log").await.unwrap()
-            );
-            assert_eq!(
-                "e\n",
+                "d\n",
                 fs::read_to_string("target/async_rotate/log.0")
                     .await
                     .unwrap()
@@ -582,7 +599,6 @@ mod tests {
         });
     }
 
-    /*
     #[quickcheck_macros::quickcheck]
     fn arbitrary_lines(count: usize) {
         tokio_test::block_on(async {
@@ -607,7 +623,6 @@ mod tests {
             fs::remove_dir_all("target/arbitrary_lines").await.unwrap();
         });
     }
-    */
 
     #[quickcheck_macros::quickcheck]
     fn arbitrary_bytes() {
