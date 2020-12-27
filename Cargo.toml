@@ -1,6 +1,6 @@
 [package]
 name = "file-rotation"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Kevin Robert Stravers <macocio@gmail.com>", "Archis Gore <archis@polyverse.com"]
 edition = "2018"
 description = "Log rotation for files, supports synchronous std API and an asynchronous tokio-based API."
