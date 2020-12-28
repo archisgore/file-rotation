@@ -1,4 +1,5 @@
 
+![Build Status](https://github.com/polyverse/file-rotation/workflows/Build%20Status/badge.svg)
 
 # file-rotate
 
