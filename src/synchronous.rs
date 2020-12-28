@@ -194,7 +194,7 @@ pub enum RotationMode {
 pub struct FileRotate {
     basename: PathBuf,
     count: usize,
-    file: File,
+    file: Option<File>,
     file_number: usize,
     max_file_number: usize,
     mode: RotationMode,
@@ -228,24 +228,33 @@ impl FileRotate {
         Ok(Self {
             basename: path.as_ref().to_path_buf(),
             count: 0,
-            file: File::create(&path)?,
+            file: Some(File::create(&path)?),
             file_number: 0,
             max_file_number,
             mode: rotation_mode,
         })
     }
 
+    fn usable_file(&mut self) -> io::Result<&mut File> {
+        if let Some(f) = &mut self.file {
+            Ok(f)
+        } else {
+            Err(io::Error::from(io::ErrorKind::NotConnected))
+        }
+    }
+
     fn rotate(&mut self) -> io::Result<()> {
         let mut path = self.basename.clone();
         path.set_extension(self.file_number.to_string());
-
-        // flush the file we have
-        self.file.flush()?;
+        if let Some(mut oldfile) = self.file.take() {
+            // flush the file we had and drop reference
+            oldfile.flush()?;
+        }
 
         // ignore renaming errors - the directory may have been deleted
         // and may be recreated later
         let _ = fs::rename(&self.basename, path);
-        self.file = File::create(&self.basename)?;
+        self.file = Some(File::create(&self.basename)?);
 
         self.file_number = (self.file_number + 1) % (self.max_file_number + 1);
         self.count = 0;
@@ -258,11 +267,11 @@ impl FileRotate {
 
         while self.count + buf.len() > bytes {
             let bytes_left = bytes - self.count;
-            written += self.file.write(&buf[..bytes_left])?;
+            written += self.usable_file()?.write(&buf[..bytes_left])?;
             self.rotate()?;
             buf = &buf[bytes_left..];
         }
-        written += self.file.write(&buf[..])?;
+        written += self.usable_file()?.write(&buf[..])?;
         self.count += written;
 
         Ok(written)
@@ -271,7 +280,7 @@ impl FileRotate {
     fn write_bytes_surpassed(&mut self, buf: &[u8], bytes: usize) -> io::Result<usize> {
         let mut written: usize = 0;
 
-        written += self.file.write(&buf)?;
+        written += self.usable_file()?.write(&buf)?;
         self.count += written;
         if self.count > bytes {
             self.rotate()?
@@ -284,14 +293,14 @@ impl FileRotate {
         let mut written: usize = 0;
 
         while let Some((idx, _)) = buf.iter().enumerate().find(|(_, byte)| *byte == &b'\n') {
-            written += self.file.write(&buf[..idx + 1])?;
+            written += self.usable_file()?.write(&buf[..idx + 1])?;
             self.count += 1;
             buf = &buf[idx + 1..];
             if self.count >= lines {
                 self.rotate()?;
             }
         }
-        written += self.file.write(buf)?;
+        written += self.usable_file()?.write(buf)?;
 
         Ok(written)
     }
@@ -299,6 +308,10 @@ impl FileRotate {
 
 impl Write for FileRotate {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.file.is_none() {
+            self.rotate()?;
+        }
+
         match self.mode {
             RotationMode::Bytes(bytes) => self.write_bytes(buf, bytes),
             RotationMode::Lines(lines) => self.write_lines(buf, lines),
@@ -307,7 +320,8 @@ impl Write for FileRotate {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.file.flush()
+        self.usable_file()?.flush()?;
+        Ok(())
     }
 }
 
@@ -359,8 +373,9 @@ mod tests {
 
         assert!(writeln!(rot, "b").is_err());
 
-        rot.flush().unwrap();
+        assert!(rot.flush().is_err());
         assert!(fs::read_dir("target/rotate").is_err());
+
         fs::create_dir("target/rotate").unwrap();
 
         writeln!(rot, "c").unwrap();

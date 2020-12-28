@@ -205,7 +205,7 @@ pub enum RotationMode {
 pub struct FileRotate {
     basename: PathBuf,
     count: usize,
-    file: Pin<Box<File>>,
+    file: Option<Pin<Box<File>>>,
     file_number: usize,
     max_file_number: usize,
     mode: RotationMode,
@@ -247,7 +247,7 @@ impl FileRotate {
         Ok(Self {
             basename: path.as_ref().to_path_buf(),
             count: 0,
-            file: Box::pin(File::create(&path).await?),
+            file: Some(Box::pin(File::create(&path).await?)),
             file_number: 0,
             max_file_number,
             mode: rotation_mode,
@@ -257,37 +257,55 @@ impl FileRotate {
         })
     }
 
+    fn usable_file(&mut self) -> io::Result<Pin<&mut File>> {
+        if let Some(f) = &mut self.file {
+            Ok(f.as_mut())
+        } else {
+            Err(io::Error::from(io::ErrorKind::NotConnected))
+        }
+    }
+
     fn reset(self: &mut Pin<&mut Self>) {
         self.written = 0;
         self.rotate_state = RotateState::Done;
     }
 
     fn poll_rotate(self: &mut Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        macro_rules! rename {
+            () => {
+                // drop old file... (we may have to recreate it again)
+                self.file = None;
+                let basename = self.basename.clone();
+                let mut path = self.basename.clone();
+                path.set_extension(self.file_number.to_string());
+                self.rotate_state =
+                    RotateState::PendingRename(Box::pin(fs::rename(basename, path)));
+                return self.poll_rotate(cx);
+            };
+        }
+
         match self.rotate_state {
             RotateState::Done => {
-                eprintln!("!!!!! PollRotate:Initializing (Starting Flush)");
                 // if called when done, start rotation...
                 // don't pin-box-store future that captures self - let the next state call
                 // poll directly
                 self.rotate_state = RotateState::PendingFlush;
                 self.poll_rotate(cx)
             }
-            RotateState::PendingFlush => match self.file.as_mut().poll_flush(cx) {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(Err(e)) => {
-                    eprintln!("!!!!! PollRotate:CompletedFlush (Error: {:?})", e);
-                    self.rotate_state = RotateState::Done;
-                    Poll::Ready(Err(e))
+            RotateState::PendingFlush => match self.file {
+                None => {
+                    rename!();
                 }
-                Poll::Ready(Ok(())) => {
-                    eprintln!("!!!!! PollRotate:CompletedFlush (Starting Rename)");
-                    let basename = self.basename.clone();
-                    let mut path = self.basename.clone();
-                    path.set_extension(self.file_number.to_string());
-                    self.rotate_state =
-                        RotateState::PendingRename(Box::pin(fs::rename(basename, path)));
-                    self.poll_rotate(cx)
-                }
+                Some(_) => match self.usable_file()?.poll_flush(cx) {
+                    Poll::Pending => Poll::Pending,
+                    Poll::Ready(Err(e)) => {
+                        self.rotate_state = RotateState::Done;
+                        Poll::Ready(Err(e))
+                    }
+                    Poll::Ready(Ok(())) => {
+                        rename!();
+                    }
+                },
             },
             RotateState::PendingRename(ref mut rename_future) => {
                 match rename_future.as_mut().poll(cx) {
@@ -296,7 +314,6 @@ impl FileRotate {
                     // Logic from synchronous side - ignore rename errors
                     // so long as create succeeds, logging continues...
                     Poll::Ready(Err(_)) | Poll::Ready(Ok(())) => {
-                        eprintln!("!!!!! PollRotate:CompletedRename (Starting Create)");
                         let basename = self.basename.clone();
                         self.rotate_state =
                             RotateState::PendingCreate(Box::pin(File::create(basename)));
@@ -308,13 +325,11 @@ impl FileRotate {
                 match create_future.as_mut().poll(cx) {
                     Poll::Pending => Poll::Pending,
                     Poll::Ready(Err(e)) => {
-                        eprintln!("!!!!! PollRotate:CompletedCreate (Error: {:?})", e);
                         self.rotate_state = RotateState::Done;
                         Poll::Ready(Err(e))
                     }
                     Poll::Ready(Ok(file)) => {
-                        eprintln!("!!!!! PollRotate:CompletedCreate Ok");
-                        self.file = Box::pin(file);
+                        self.file = Some(Box::pin(file));
                         self.file_number = (self.file_number + 1) % (self.max_file_number + 1);
                         self.count = 0;
                         self.rotate_state = RotateState::Done;
@@ -340,14 +355,17 @@ impl FileRotate {
             (&buf_to_write[..], false)
         };
 
-        match self.file.as_mut().poll_write(cx, subbuf) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-            Poll::Ready(Ok(w)) => {
-                self.written += w;
-                self.count += w;
-                Poll::Ready(Ok(should_rotate))
-            }
+        match self.usable_file() {
+            Err(e) => Poll::Ready(Err(e)),
+            Ok(file) => match file.poll_write(cx, subbuf) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+                Poll::Ready(Ok(w)) => {
+                    self.written += w;
+                    self.count += w;
+                    Poll::Ready(Ok(should_rotate))
+                }
+            },
         }
     }
 
@@ -358,15 +376,18 @@ impl FileRotate {
         bytes: usize,
     ) -> Poll<io::Result<bool>> {
         let buf_to_write = &complete_buf[self.written..];
-        match self.file.as_mut().poll_write(cx, buf_to_write) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-            Poll::Ready(Ok(w)) => {
-                self.written += w;
-                self.count += w;
-                let should_rotate = self.count > bytes;
-                Poll::Ready(Ok(should_rotate))
-            }
+
+        match self.usable_file() {
+            Err(e) => Poll::Ready(Err(e)),
+            Ok(file) => match file.poll_write(cx, buf_to_write) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+                Poll::Ready(Ok(w)) => {
+                    self.written += w;
+                    self.count += w;
+                    Poll::Ready(Ok(self.count > bytes))
+                }
+            },
         }
     }
 
@@ -387,15 +408,17 @@ impl FileRotate {
             &buf_to_write
         };
 
-        match self.file.as_mut().poll_write(cx, subbuf) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-            Poll::Ready(Ok(w)) => {
-                self.written += w;
-                self.count += 1;
-                let should_rotate = self.count >= lines;
-                Poll::Ready(Ok(should_rotate))
-            }
+        match self.usable_file() {
+            Err(e) => Poll::Ready(Err(e)),
+            Ok(file) => match file.poll_write(cx, subbuf) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+                Poll::Ready(Ok(w)) => {
+                    self.written += w;
+                    self.count += 1;
+                    Poll::Ready(Ok(self.count >= lines))
+                }
+            },
         }
     }
 }
@@ -406,27 +429,39 @@ impl AsyncWrite for FileRotate {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
+        /// This generates a block to call poll_rotate and handle the immediate response
+        /// Unfortunately I don't know of any way to abstract this block out as a function
+        /// at each call site. I don't yet know how to rewrite the state machine to collapse
+        /// them all into fewer (or a single) callsite.
+        macro_rules! rotate {
+            () => {
+                match self.poll_rotate(cx) {
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(Err(e)) => {
+                        self.reset();
+                        return Poll::Ready(Err(e));
+                    }
+                    Poll::Ready(Ok(())) => return self.poll_write(cx, buf),
+                }
+            };
+        }
+
         // are we waiting on a rotation future? Handle it
         match self.rotate_state {
-            RotateState::Done => {
-                // when not rotating... fall through/continue
-            }
-            _ => match self.poll_rotate(cx) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(Err(e)) => {
-                    self.reset();
-                    return Poll::Ready(Err(e));
-                }
-                Poll::Ready(Ok(())) => {
-                    // when rotation done... fall through/continue
-                }
-            },
+            RotateState::Done => {}
+            _ => rotate!(),
+        }
+
+        // do we not have a file? If so, rotate
+        if self.file.is_none() {
+            rotate!();
         }
 
         // Is it done? Finish everything up.
         if buf.len() == self.written {
+            let w = self.written;
             self.reset();
-            return Poll::Ready(Ok(self.written));
+            return Poll::Ready(Ok(w));
         }
 
         let poll_write_result = match self.mode {
@@ -441,37 +476,27 @@ impl AsyncWrite for FileRotate {
                 self.reset();
                 Poll::Ready(Err(e))
             }
-            Poll::Ready(Ok(should_rotate)) => {
-                if should_rotate {
-                    eprintln!(
-                        "!!!!! Rotation:Started (Buf Len: {}, Count: {}, Written: {})",
-                        buf.len(),
-                        self.count,
-                        self.written
-                    );
-                    match self.poll_rotate(cx) {
-                        Poll::Pending => return Poll::Pending,
-                        Poll::Ready(Err(e)) => {
-                            self.reset();
-                            return Poll::Ready(Err(e));
-                        }
-                        Poll::Ready(Ok(())) => {}
-                    }
-                }
-
-                self.poll_write(cx, buf)
+            Poll::Ready(Ok(false)) => self.poll_write(cx, buf),
+            Poll::Ready(Ok(true)) => {
+                rotate!()
             }
         }
     }
 
     // pass flush down to the current file
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.file.as_mut().poll_flush(cx)
+        match self.usable_file() {
+            Err(e) => Poll::Ready(Err(e)),
+            Ok(file) => file.poll_flush(cx),
+        }
     }
 
     // pass shutdown down to the current file
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.file.as_mut().poll_shutdown(cx)
+        match self.usable_file() {
+            Err(e) => Poll::Ready(Err(e)),
+            Ok(file) => file.poll_shutdown(cx),
+        }
     }
 }
 
@@ -545,7 +570,7 @@ mod tests {
 
             assert!(rot.write(b"b\n").await.is_err());
 
-            rot.flush().await.unwrap();
+            assert!(rot.flush().await.is_err());
             assert!(fs::read_dir("target/async_rotate").await.is_err());
 
             fs::create_dir("target/async_rotate").await.unwrap();
@@ -573,11 +598,13 @@ mod tests {
     #[test]
     fn write_complete_record_until_bytes_surpassed() {
         tokio_test::block_on(async {
-            let _ = fs::remove_dir_all("target/surpassed_bytes").await;
-            fs::create_dir("target/surpassed_bytes").await.unwrap();
+            let _ = fs::remove_dir_all("target/async_surpassed_bytes").await;
+            fs::create_dir("target/async_surpassed_bytes")
+                .await
+                .unwrap();
 
             let mut rot = FileRotate::new(
-                "target/surpassed_bytes/log",
+                "target/async_surpassed_bytes/log",
                 RotationMode::BytesSurpassed(1),
                 1,
             )
@@ -586,41 +613,50 @@ mod tests {
 
             rot.write(b"0123456789").await.unwrap();
             rot.flush().await.unwrap();
-            assert!(Path::new("target/surpassed_bytes/log.0").exists());
+            assert!(Path::new("target/async_surpassed_bytes/log.0").exists());
             // shouldn't exist yet - because entire record was written in one shot
-            assert!(!Path::new("target/surpassed_bytes/log.1").exists());
+            assert!(!Path::new("target/async_surpassed_bytes/log.1").exists());
 
             // This should create the second file
             rot.write(b"0123456789").await.unwrap();
             rot.flush().await.unwrap();
-            assert!(Path::new("target/surpassed_bytes/log.1").exists());
+            assert!(Path::new("target/async_surpassed_bytes/log.1").exists());
 
-            fs::remove_dir_all("target/surpassed_bytes").await.unwrap();
+            fs::remove_dir_all("target/async_surpassed_bytes")
+                .await
+                .unwrap();
         });
     }
 
     #[quickcheck_macros::quickcheck]
     fn arbitrary_lines(count: usize) {
         tokio_test::block_on(async {
-            let _ = fs::remove_dir_all("target/arbitrary_lines").await;
-            fs::create_dir("target/arbitrary_lines").await.unwrap();
+            let _ = fs::remove_dir_all("target/async_arbitrary_lines").await;
+            fs::create_dir("target/async_arbitrary_lines")
+                .await
+                .unwrap();
 
             let count = count.max(1);
-            let mut rot =
-                FileRotate::new("target/arbitrary_lines/log", RotationMode::Lines(count), 0)
-                    .await
-                    .unwrap();
+            let mut rot = FileRotate::new(
+                "target/async_arbitrary_lines/log",
+                RotationMode::Lines(count),
+                0,
+            )
+            .await
+            .unwrap();
 
             for _ in 0..count - 1 {
                 rot.write(b"\n").await.unwrap();
             }
 
             rot.flush().await.unwrap();
-            assert!(!Path::new("target/arbitrary_lines/log.0").exists());
+            assert!(!Path::new("target/async_arbitrary_lines/log.0").exists());
             rot.write(b"\n").await.unwrap();
-            assert!(Path::new("target/arbitrary_lines/log.0").exists());
+            assert!(Path::new("target/async_arbitrary_lines/log.0").exists());
 
-            fs::remove_dir_all("target/arbitrary_lines").await.unwrap();
+            fs::remove_dir_all("target/async_arbitrary_lines")
+                .await
+                .unwrap();
         });
     }
 
