@@ -17,9 +17,10 @@ sync = []
 [dependencies]
 futures = { version = "0.3.8", optional = true }
 futures-util = { version = "0.3.8", optional = true }
-tokio = { version = "1.0.1", features = ["rt", "fs", "io-util", "macros"], optional = true }
+tokio = { version = "1.0.1", features = ["fs", "io-util"], optional = true }
 
 [dev-dependencies]
 quickcheck = "0.9"
 quickcheck_macros = "0.9"
 quickcheck_async = "0.1.1"
+tokio = { version = "1.0.1", features = ["rt", "fs", "io-util", "macros"]}
