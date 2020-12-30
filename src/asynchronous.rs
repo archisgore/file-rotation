@@ -505,190 +505,176 @@ mod tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
 
-    #[test]
-    fn zero_bytes() {
-        tokio_test::block_on(async {
-            let zerobyteserr =
-                FileRotate::new("target/async_zero_bytes", RotationMode::Bytes(0), 0).await;
-            if let Err(error::Error::ZeroBytes) = zerobyteserr {
-            } else {
-                panic!("Expected Error::ZeroBytes");
-            };
-        })
+    #[tokio::test]
+    async fn zero_bytes() {
+        let zerobyteserr =
+            FileRotate::new("target/async_zero_bytes", RotationMode::Bytes(0), 0).await;
+        if let Err(error::Error::ZeroBytes) = zerobyteserr {
+        } else {
+            panic!("Expected Error::ZeroBytes");
+        };
     }
 
-    #[test]
-    fn zero_bytes_surpassed() {
-        tokio_test::block_on(async {
-            let zerobyteserr = FileRotate::new(
-                "target/async_zero_bytes",
-                RotationMode::BytesSurpassed(0),
-                0,
-            )
-            .await;
-            if let Err(error::Error::ZeroBytes) = zerobyteserr {
-            } else {
-                panic!("Expected Error::ZeroBytes");
-            };
-        });
+    #[tokio::test]
+    async fn zero_bytes_surpassed() {
+        let zerobyteserr = FileRotate::new(
+            "target/async_zero_bytes",
+            RotationMode::BytesSurpassed(0),
+            0,
+        )
+        .await;
+        if let Err(error::Error::ZeroBytes) = zerobyteserr {
+        } else {
+            panic!("Expected Error::ZeroBytes");
+        };
     }
 
-    #[test]
-    fn zero_lines() {
-        tokio_test::block_on(async {
-            let zerolineserr =
-                FileRotate::new("target/async_zero_lines", RotationMode::Lines(0), 0).await;
-            if let Err(error::Error::ZeroLines) = zerolineserr {
-            } else {
-                panic!("Expected Error::ZeroLines");
-            };
-        });
+    #[tokio::test]
+    async fn zero_lines() {
+        let zerolineserr =
+            FileRotate::new("target/async_zero_lines", RotationMode::Lines(0), 0).await;
+        if let Err(error::Error::ZeroLines) = zerolineserr {
+        } else {
+            panic!("Expected Error::ZeroLines");
+        };
     }
 
-    #[test]
-    fn rotate_to_deleted_directory() {
-        tokio_test::block_on(async {
-            let _ = fs::remove_dir_all("target/async_rotate").await;
-            fs::create_dir("target/async_rotate").await.unwrap();
+    #[tokio::test]
+    async fn rotate_to_deleted_directory() {
+        let _ = fs::remove_dir_all("target/async_rotate").await;
+        fs::create_dir("target/async_rotate").await.unwrap();
 
-            let mut rot = FileRotate::new("target/async_rotate/log", RotationMode::Lines(1), 0)
+        let mut rot = FileRotate::new("target/async_rotate/log", RotationMode::Lines(1), 0)
+            .await
+            .unwrap();
+        rot.write(b"a\n").await.unwrap();
+        assert_eq!(
+            "",
+            fs::read_to_string("target/async_rotate/log").await.unwrap()
+        );
+        assert_eq!(
+            "a\n",
+            fs::read_to_string("target/async_rotate/log.0")
                 .await
-                .unwrap();
-            rot.write(b"a\n").await.unwrap();
-            assert_eq!(
-                "",
-                fs::read_to_string("target/async_rotate/log").await.unwrap()
-            );
-            assert_eq!(
-                "a\n",
-                fs::read_to_string("target/async_rotate/log.0")
-                    .await
-                    .unwrap()
-            );
+                .unwrap()
+        );
 
-            fs::remove_dir_all("target/async_rotate").await.unwrap();
+        fs::remove_dir_all("target/async_rotate").await.unwrap();
 
-            assert!(rot.write(b"b\n").await.is_err());
+        assert!(rot.write(b"b\n").await.is_err());
 
-            assert!(rot.flush().await.is_err());
-            assert!(fs::read_dir("target/async_rotate").await.is_err());
+        assert!(rot.flush().await.is_err());
+        assert!(fs::read_dir("target/async_rotate").await.is_err());
 
-            fs::create_dir("target/async_rotate").await.unwrap();
+        fs::create_dir("target/async_rotate").await.unwrap();
 
-            rot.write(b"c\n").await.unwrap();
-            assert_eq!(
-                "",
-                fs::read_to_string("target/async_rotate/log").await.unwrap()
-            );
+        rot.write(b"c\n").await.unwrap();
+        assert_eq!(
+            "",
+            fs::read_to_string("target/async_rotate/log").await.unwrap()
+        );
 
-            rot.write(b"d\n").await.unwrap();
-            assert_eq!(
-                "",
-                fs::read_to_string("target/async_rotate/log").await.unwrap()
-            );
-            assert_eq!(
-                "d\n",
-                fs::read_to_string("target/async_rotate/log.0")
-                    .await
-                    .unwrap()
-            );
-        });
+        rot.write(b"d\n").await.unwrap();
+        assert_eq!(
+            "",
+            fs::read_to_string("target/async_rotate/log").await.unwrap()
+        );
+        assert_eq!(
+            "d\n",
+            fs::read_to_string("target/async_rotate/log.0")
+                .await
+                .unwrap()
+        );
     }
 
-    #[test]
-    fn write_complete_record_until_bytes_surpassed() {
-        tokio_test::block_on(async {
-            let _ = fs::remove_dir_all("target/async_surpassed_bytes").await;
-            fs::create_dir("target/async_surpassed_bytes")
-                .await
-                .unwrap();
-
-            let mut rot = FileRotate::new(
-                "target/async_surpassed_bytes/log",
-                RotationMode::BytesSurpassed(1),
-                1,
-            )
+    #[tokio::test]
+    async fn write_complete_record_until_bytes_surpassed() {
+        let _ = fs::remove_dir_all("target/async_surpassed_bytes").await;
+        fs::create_dir("target/async_surpassed_bytes")
             .await
             .unwrap();
 
-            rot.write(b"0123456789").await.unwrap();
-            rot.flush().await.unwrap();
-            assert!(Path::new("target/async_surpassed_bytes/log.0").exists());
-            // shouldn't exist yet - because entire record was written in one shot
-            assert!(!Path::new("target/async_surpassed_bytes/log.1").exists());
+        let mut rot = FileRotate::new(
+            "target/async_surpassed_bytes/log",
+            RotationMode::BytesSurpassed(1),
+            1,
+        )
+        .await
+        .unwrap();
 
-            // This should create the second file
-            rot.write(b"0123456789").await.unwrap();
-            rot.flush().await.unwrap();
-            assert!(Path::new("target/async_surpassed_bytes/log.1").exists());
+        rot.write(b"0123456789").await.unwrap();
+        rot.flush().await.unwrap();
+        assert!(Path::new("target/async_surpassed_bytes/log.0").exists());
+        // shouldn't exist yet - because entire record was written in one shot
+        assert!(!Path::new("target/async_surpassed_bytes/log.1").exists());
 
-            fs::remove_dir_all("target/async_surpassed_bytes")
-                .await
-                .unwrap();
-        });
+        // This should create the second file
+        rot.write(b"0123456789").await.unwrap();
+        rot.flush().await.unwrap();
+        assert!(Path::new("target/async_surpassed_bytes/log.1").exists());
+
+        fs::remove_dir_all("target/async_surpassed_bytes")
+            .await
+            .unwrap();
     }
 
-    #[quickcheck_macros::quickcheck]
-    fn arbitrary_lines(count: usize) {
-        tokio_test::block_on(async {
-            let _ = fs::remove_dir_all("target/async_arbitrary_lines").await;
-            fs::create_dir("target/async_arbitrary_lines")
-                .await
-                .unwrap();
-
-            let count = count.max(1);
-            let mut rot = FileRotate::new(
-                "target/async_arbitrary_lines/log",
-                RotationMode::Lines(count),
-                0,
-            )
+    #[quickcheck_async::tokio]
+    async fn arbitrary_lines(count: usize) {
+        let _ = fs::remove_dir_all("target/async_arbitrary_lines").await;
+        fs::create_dir("target/async_arbitrary_lines")
             .await
             .unwrap();
 
-            for _ in 0..count - 1 {
-                rot.write(b"\n").await.unwrap();
-            }
+        let count = count.max(1);
+        let mut rot = FileRotate::new(
+            "target/async_arbitrary_lines/log",
+            RotationMode::Lines(count),
+            0,
+        )
+        .await
+        .unwrap();
 
-            rot.flush().await.unwrap();
-            assert!(!Path::new("target/async_arbitrary_lines/log.0").exists());
+        for _ in 0..count - 1 {
             rot.write(b"\n").await.unwrap();
-            assert!(Path::new("target/async_arbitrary_lines/log.0").exists());
+        }
 
-            fs::remove_dir_all("target/async_arbitrary_lines")
-                .await
-                .unwrap();
-        });
+        rot.flush().await.unwrap();
+        assert!(!Path::new("target/async_arbitrary_lines/log.0").exists());
+        rot.write(b"\n").await.unwrap();
+        assert!(Path::new("target/async_arbitrary_lines/log.0").exists());
+
+        fs::remove_dir_all("target/async_arbitrary_lines")
+            .await
+            .unwrap();
     }
 
-    #[quickcheck_macros::quickcheck]
-    fn arbitrary_bytes() {
-        tokio_test::block_on(async {
-            let _ = fs::remove_dir_all("target/async_arbitrary_bytes").await;
-            fs::create_dir("target/async_arbitrary_bytes")
-                .await
-                .unwrap();
-
-            let count = 0.max(1);
-            let mut rot = FileRotate::new(
-                "target/async_arbitrary_bytes/log",
-                RotationMode::Bytes(count),
-                0,
-            )
+    #[quickcheck_async::tokio]
+    async fn arbitrary_bytes() {
+        let _ = fs::remove_dir_all("target/async_arbitrary_bytes").await;
+        fs::create_dir("target/async_arbitrary_bytes")
             .await
             .unwrap();
 
-            for _ in 0..count {
-                rot.write(b"0").await.unwrap();
-            }
+        let count = 0.max(1);
+        let mut rot = FileRotate::new(
+            "target/async_arbitrary_bytes/log",
+            RotationMode::Bytes(count),
+            0,
+        )
+        .await
+        .unwrap();
 
-            rot.flush().await.unwrap();
-            assert!(!Path::new("target/async_arbitrary_bytes/log.0").exists());
-            rot.write(b"1").await.unwrap();
-            assert!(Path::new("target/async_arbitrary_bytes/log.0").exists());
+        for _ in 0..count {
+            rot.write(b"0").await.unwrap();
+        }
 
-            fs::remove_dir_all("target/async_arbitrary_bytes")
-                .await
-                .unwrap();
-        });
+        rot.flush().await.unwrap();
+        assert!(!Path::new("target/async_arbitrary_bytes/log.0").exists());
+        rot.write(b"1").await.unwrap();
+        assert!(Path::new("target/async_arbitrary_bytes/log.0").exists());
+
+        fs::remove_dir_all("target/async_arbitrary_bytes")
+            .await
+            .unwrap();
     }
 }
