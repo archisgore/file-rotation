@@ -1,6 +1,6 @@
 [package]
 name = "file-rotation"
-version = "0.4.0"
+version = "0.4.1"
 authors = ["Kevin Robert Stravers <macocio@gmail.com>", "Archis Gore <archis@polyverse.com"]
 edition = "2018"
 description = "Log rotation for files, supports synchronous std API and an asynchronous tokio-based API."
@@ -10,7 +10,7 @@ keywords= ["log", "rotate", "logrotate"]
 license = "LGPL-3.0-or-later"
 
 [features]
-default = ["sync"]
+default = ["async"]
 async = ["futures", "futures-util", "tokio"]
 sync = []
 
