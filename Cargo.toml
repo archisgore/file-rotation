@@ -24,3 +24,7 @@ quickcheck = "0.9"
 quickcheck_macros = "0.9"
 quickcheck_async = "0.1.1"
 tokio = { version = "1.0.1", features = ["rt", "fs", "io-util", "macros"]}
+
+[package.metadata.cargo-all-features]
+skip_optional_dependencies = true
+
