@@ -417,7 +417,8 @@ mod tests {
         let _ = fs::remove_dir_all("target/arbitrary_lines");
         fs::create_dir("target/arbitrary_lines").unwrap();
 
-        let count = count.max(1);
+        // we don't need an idiotically large number of lines
+        let count = count.max(1).min(100);
         let mut rot =
             FileRotate::new("target/arbitrary_lines/log", RotationMode::Lines(count), 0).unwrap();
 
