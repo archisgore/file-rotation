@@ -352,7 +352,7 @@ impl FileRotate {
             let bytes_left = bytes - self.count;
             (&buf_to_write[..bytes_left], true)
         } else {
-            (&buf_to_write[..], false)
+            (buf_to_write, false)
         };
 
         match self.usable_file() {

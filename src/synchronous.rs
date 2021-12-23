@@ -271,7 +271,7 @@ impl FileRotate {
             self.rotate()?;
             buf = &buf[bytes_left..];
         }
-        written += self.usable_file()?.write(&buf[..])?;
+        written += self.usable_file()?.write(&buf)?;
         self.count += written;
 
         Ok(written)
@@ -280,7 +280,7 @@ impl FileRotate {
     fn write_bytes_surpassed(&mut self, buf: &[u8], bytes: usize) -> io::Result<usize> {
         let mut written: usize = 0;
 
-        written += self.usable_file()?.write(&buf)?;
+        written += self.usable_file()?.write(buf)?;
         self.count += written;
         if self.count > bytes {
             self.rotate()?
