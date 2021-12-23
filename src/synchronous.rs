@@ -271,7 +271,7 @@ impl FileRotate {
             self.rotate()?;
             buf = &buf[bytes_left..];
         }
-        written += self.usable_file()?.write(&buf)?;
+        written += self.usable_file()?.write(buf)?;
         self.count += written;
 
         Ok(written)
