@@ -1,13 +1,13 @@
 [package]
 name = "file-rotation"
-version = "0.4.1"
+version = "0.4.2"
 authors = ["Kevin Robert Stravers <macocio@gmail.com>", "Archis Gore <archis@polyverse.com"]
 edition = "2018"
 description = "Log rotation for files, supports synchronous std API and an asynchronous tokio-based API."
-homepage = "https://github.com/polyverse/file-rotate"
-repository = "https://github.com/polyverse/file-rotate"
+homepage = "https://github.com/polyverse/file-rotation"
+repository = "https://github.com/polyverse/file-rotation"
 keywords= ["log", "rotate", "logrotate"]
-license = "LGPL-3.0-or-later"
+license = "MIT"
 
 [features]
 default = ["async"]
@@ -15,15 +15,15 @@ async = ["futures", "futures-util", "tokio"]
 sync = []
 
 [dependencies]
-futures = { version = "0.3.8", optional = true }
-futures-util = { version = "0.3.8", optional = true }
-tokio = { version = "1.0.1", features = ["fs", "io-util"], optional = true }
+futures = { version = "0.3.19", optional = true }
+futures-util = { version = "0.3.19", optional = true }
+tokio = { version = "1.15.0", features = ["fs", "io-util"], optional = true }
 
 [dev-dependencies]
-quickcheck = "0.9"
-quickcheck_macros = "0.9"
+quickcheck = "1.0.3"
+quickcheck_macros = "1.0.0"
 quickcheck_async = "0.1.1"
-tokio = { version = "1.0.1", features = ["rt", "fs", "io-util", "macros"]}
+tokio = { version = "1.15.0", features = ["rt", "fs", "io-util", "macros"]}
 
 [package.metadata.cargo-all-features]
 skip_optional_dependencies = true
