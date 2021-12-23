@@ -7,8 +7,9 @@
 //! We can rotate log files by using the amount of lines as a limit.
 //!
 //! ```
-//! use file_rotation::{FileRotate, RotationMode};
+//! use file_rotation::asynchronous::{FileRotate, RotationMode};
 //! use tokio::{fs, io::AsyncWriteExt};
+//! use tokio_test;
 //!
 //! tokio_test::block_on(async {
 //!   // Create a directory to store our logs, this is not strictly needed but shows how we can
@@ -51,8 +52,9 @@
 //! contain complete lines which do not split across files.
 //!
 //! ```
-//! use file_rotation::{FileRotate, RotationMode};
+//! use file_rotation::asynchronous::{FileRotate, RotationMode};
 //! use tokio::{fs, io::AsyncWriteExt};
+//! use tokio_test;
 //!
 //! tokio_test::block_on(async {
 //!
@@ -91,8 +93,9 @@
 //! Another method of rotation is by bytes instead of lines.
 //!
 //! ```
-//! use file_rotation::{FileRotate, RotationMode};
+//! use file_rotation::asynchronous::{FileRotate, RotationMode};
 //! use tokio::{fs, io::AsyncWriteExt};
+//! use tokio_test;
 //!
 //! tokio_test::block_on(async {
 //!   fs::create_dir("target/async-my-log-directory-bytes").await;
@@ -116,8 +119,9 @@
 //! Here's an example with 1 byte limits:
 //!
 //! ```
-//! use file_rotation::{FileRotate, RotationMode};
+//! use file_rotation::asynchronous::{FileRotate, RotationMode};
 //! use tokio::{fs, io::AsyncWriteExt};
+//! use tokio_test;
 //!
 //! tokio_test::block_on(async {
 //!   fs::create_dir("target/async-my-log-directory-small").await;
@@ -620,12 +624,14 @@ mod tests {
 
     #[quickcheck_async::tokio]
     async fn arbitrary_lines(count: usize) {
+        println!("Testing arbitary lines: {}\n", count);
         let _ = fs::remove_dir_all("target/async_arbitrary_lines").await;
         fs::create_dir("target/async_arbitrary_lines")
             .await
             .unwrap();
 
-        let count = count.max(1);
+        // we don't need an idiotically large number of lines
+        let count = count.max(1).min(100);
         let mut rot = FileRotate::new(
             "target/async_arbitrary_lines/log",
             RotationMode::Lines(count),
@@ -634,6 +640,7 @@ mod tests {
         .await
         .unwrap();
 
+        println!("Writing lines...: {}\n", count);
         for _ in 0..count - 1 {
             rot.write(b"\n").await.unwrap();
         }
