@@ -53,7 +53,7 @@
 //!
 //! // Create a directory to store our logs, this is not strictly needed but shows how we can
 //! // arbitrary paths.
-//! fs::create_dir("target/my-log-directory-lines");
+//! fs::create_dir("target/my-log-directory-surpassed");
 //!
 //! // Create a new log writer. The first argument is anything resembling a path. The
 //! // basename is used for naming the log files.
@@ -61,7 +61,7 @@
 //! // Here we choose to limit logs by 10 lines, and have at most 2 rotated log files. This
 //! // makes the total amount of log files 4, since the original file is present as well as
 //! // file 0.
-//! let mut log = FileRotate::new("target/my-log-directory-lines/my-log-file", RotationMode::BytesSurpassed(2), 2).unwrap();
+//! let mut log = FileRotate::new("target/my-log-directory-surpassed/my-log-file", RotationMode::BytesSurpassed(2), 2).unwrap();
 //!
 //! // Write a bunch of lines
 //! log.write("Line 1: Hello World!\n".as_bytes());
@@ -70,13 +70,13 @@
 //! }
 //!
 //! // the latest file is empty - since the previous file surpassed bytes and was rotated out
-//! assert_eq!("", fs::read_to_string("target/my-log-directory-lines/my-log-file").unwrap());
+//! assert_eq!("", fs::read_to_string("target/my-log-directory-surpassed/my-log-file").unwrap());
 //!
-//! assert_eq!("Line 10", fs::read_to_string("target/my-log-directory-lines/my-log-file.0").unwrap());
-//! assert_eq!("Line 8", fs::read_to_string("target/my-log-directory-lines/my-log-file.1").unwrap());
-//! assert_eq!("Line 9", fs::read_to_string("target/my-log-directory-lines/my-log-file.2").unwrap());
+//! assert_eq!("Line 10", fs::read_to_string("target/my-log-directory-surpassed/my-log-file.0").unwrap());
+//! assert_eq!("Line 8", fs::read_to_string("target/my-log-directory-surpassed/my-log-file.1").unwrap());
+//! assert_eq!("Line 9", fs::read_to_string("target/my-log-directory-surpassed/my-log-file.2").unwrap());
 //!
-//! fs::remove_dir_all("target/my-log-directory-lines");
+//! fs::remove_dir_all("target/my-log-directory-surpassed");
 //! ```
 //!
 //!
@@ -213,13 +213,13 @@ impl FileRotate {
         max_file_number: usize,
     ) -> Result<Self> {
         match rotation_mode {
-            RotationMode::Bytes(bytes) if bytes == 0 => {
+            RotationMode::Bytes(0) => {
                 return Err(error::Error::ZeroBytes);
             }
-            RotationMode::Lines(lines) if lines == 0 => {
+            RotationMode::Lines(0) => {
                 return Err(error::Error::ZeroLines);
             }
-            RotationMode::BytesSurpassed(bytes) if bytes == 0 => {
+            RotationMode::BytesSurpassed(0) => {
                 return Err(error::Error::ZeroBytes);
             }
             _ => {}
@@ -418,7 +418,7 @@ mod tests {
         fs::create_dir("target/arbitrary_lines").unwrap();
 
         // we don't need an idiotically large number of lines
-        let count = count.max(1).min(100);
+        let count = count.clamp(1, 100);
         let mut rot =
             FileRotate::new("target/arbitrary_lines/log", RotationMode::Lines(count), 0).unwrap();
 
@@ -439,7 +439,7 @@ mod tests {
         let _ = fs::remove_dir_all("target/arbitrary_bytes");
         fs::create_dir("target/arbitrary_bytes").unwrap();
 
-        let count = 0.max(1);
+        let count = 1;
         let mut rot =
             FileRotate::new("target/arbitrary_bytes/log", RotationMode::Bytes(count), 0).unwrap();
 

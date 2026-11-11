@@ -60,7 +60,7 @@
 //!
 //!   // Create a directory to store our logs, this is not strictly needed but shows how we can
 //!   // arbitrary paths.
-//!   fs::create_dir("target/async-my-log-directory-lines").await.unwrap();
+//!   fs::create_dir("target/async-my-log-directory-surpassed").await.unwrap();
 //!
 //!   // Create a new log writer. The first argument is anything resembling a path. The
 //!   // basename is used for naming the log files.
@@ -68,7 +68,7 @@
 //!   // Here we choose to limit logs by 10 lines, and have at most 2 rotated log files. This
 //!   // makes the total amount of log files 4, since the original file is present as well as
 //!   // file 0.
-//!   let mut log = FileRotate::new("target/async-my-log-directory-lines/my-log-file", RotationMode::BytesSurpassed(2), 2).await.unwrap();
+//!   let mut log = FileRotate::new("target/async-my-log-directory-surpassed/my-log-file", RotationMode::BytesSurpassed(2), 2).await.unwrap();
 //!
 //!   // Write a bunch of lines
 //!   log.write("Line 1: Hello World!\n".as_bytes()).await;
@@ -77,13 +77,13 @@
 //!   }
 //!
 //!   // the latest file is empty - since the previous file surpassed bytes and was rotated out
-//!   assert_eq!("", fs::read_to_string("target/async-my-log-directory-lines/my-log-file").await.unwrap());
+//!   assert_eq!("", fs::read_to_string("target/async-my-log-directory-surpassed/my-log-file").await.unwrap());
 //!
-//!   assert_eq!("Line 10", fs::read_to_string("target/async-my-log-directory-lines/my-log-file.0").await.unwrap());
-//!   assert_eq!("Line 8", fs::read_to_string("target/async-my-log-directory-lines/my-log-file.1").await.unwrap());
-//!   assert_eq!("Line 9", fs::read_to_string("target/async-my-log-directory-lines/my-log-file.2").await.unwrap());
+//!   assert_eq!("Line 10", fs::read_to_string("target/async-my-log-directory-surpassed/my-log-file.0").await.unwrap());
+//!   assert_eq!("Line 8", fs::read_to_string("target/async-my-log-directory-surpassed/my-log-file.1").await.unwrap());
+//!   assert_eq!("Line 9", fs::read_to_string("target/async-my-log-directory-surpassed/my-log-file.2").await.unwrap());
 //!
-//!   fs::remove_dir_all("target/async-my-log-directory-lines").await;
+//!   fs::remove_dir_all("target/async-my-log-directory-surpassed").await;
 //! });
 //! ```
 //!
@@ -236,13 +236,13 @@ impl FileRotate {
         max_file_number: usize,
     ) -> Result<Self> {
         match rotation_mode {
-            RotationMode::Bytes(bytes) if bytes == 0 => {
+            RotationMode::Bytes(0) => {
                 return Err(error::Error::ZeroBytes);
             }
-            RotationMode::Lines(lines) if lines == 0 => {
+            RotationMode::Lines(0) => {
                 return Err(error::Error::ZeroLines);
             }
-            RotationMode::BytesSurpassed(bytes) if bytes == 0 => {
+            RotationMode::BytesSurpassed(0) => {
                 return Err(error::Error::ZeroBytes);
             }
             _ => {}
@@ -409,7 +409,7 @@ impl FileRotate {
         {
             &buf_to_write[..idx + 1]
         } else {
-            &buf_to_write
+            buf_to_write
         };
 
         match self.usable_file() {
@@ -551,7 +551,7 @@ mod tests {
         let mut rot = FileRotate::new("target/async_rotate/log", RotationMode::Lines(1), 0)
             .await
             .unwrap();
-        rot.write(b"a\n").await.unwrap();
+        rot.write_all(b"a\n").await.unwrap();
         assert_eq!(
             "",
             fs::read_to_string("target/async_rotate/log").await.unwrap()
@@ -572,13 +572,13 @@ mod tests {
 
         fs::create_dir("target/async_rotate").await.unwrap();
 
-        rot.write(b"c\n").await.unwrap();
+        rot.write_all(b"c\n").await.unwrap();
         assert_eq!(
             "",
             fs::read_to_string("target/async_rotate/log").await.unwrap()
         );
 
-        rot.write(b"d\n").await.unwrap();
+        rot.write_all(b"d\n").await.unwrap();
         assert_eq!(
             "",
             fs::read_to_string("target/async_rotate/log").await.unwrap()
@@ -606,14 +606,14 @@ mod tests {
         .await
         .unwrap();
 
-        rot.write(b"0123456789").await.unwrap();
+        rot.write_all(b"0123456789").await.unwrap();
         rot.flush().await.unwrap();
         assert!(Path::new("target/async_surpassed_bytes/log.0").exists());
         // shouldn't exist yet - because entire record was written in one shot
         assert!(!Path::new("target/async_surpassed_bytes/log.1").exists());
 
         // This should create the second file
-        rot.write(b"0123456789").await.unwrap();
+        rot.write_all(b"0123456789").await.unwrap();
         rot.flush().await.unwrap();
         assert!(Path::new("target/async_surpassed_bytes/log.1").exists());
 
@@ -622,8 +622,12 @@ mod tests {
             .unwrap();
     }
 
-    #[quickcheck_async::tokio]
-    async fn arbitrary_lines(count: usize) {
+    #[quickcheck_macros::quickcheck]
+    fn arbitrary_lines(count: usize) {
+        tokio_test::block_on(arbitrary_lines_impl(count));
+    }
+
+    async fn arbitrary_lines_impl(count: usize) {
         println!("Testing arbitary lines: {}\n", count);
         let _ = fs::remove_dir_all("target/async_arbitrary_lines").await;
         fs::create_dir("target/async_arbitrary_lines")
@@ -631,7 +635,7 @@ mod tests {
             .unwrap();
 
         // we don't need an idiotically large number of lines
-        let count = count.max(1).min(100);
+        let count = count.clamp(1, 100);
         let mut rot = FileRotate::new(
             "target/async_arbitrary_lines/log",
             RotationMode::Lines(count),
@@ -642,12 +646,12 @@ mod tests {
 
         println!("Writing lines...: {}\n", count);
         for _ in 0..count - 1 {
-            rot.write(b"\n").await.unwrap();
+            rot.write_all(b"\n").await.unwrap();
         }
 
         rot.flush().await.unwrap();
         assert!(!Path::new("target/async_arbitrary_lines/log.0").exists());
-        rot.write(b"\n").await.unwrap();
+        rot.write_all(b"\n").await.unwrap();
         assert!(Path::new("target/async_arbitrary_lines/log.0").exists());
 
         fs::remove_dir_all("target/async_arbitrary_lines")
@@ -655,14 +659,18 @@ mod tests {
             .unwrap();
     }
 
-    #[quickcheck_async::tokio]
-    async fn arbitrary_bytes() {
+    #[quickcheck_macros::quickcheck]
+    fn arbitrary_bytes() {
+        tokio_test::block_on(arbitrary_bytes_impl());
+    }
+
+    async fn arbitrary_bytes_impl() {
         let _ = fs::remove_dir_all("target/async_arbitrary_bytes").await;
         fs::create_dir("target/async_arbitrary_bytes")
             .await
             .unwrap();
 
-        let count = 0.max(1);
+        let count = 1;
         let mut rot = FileRotate::new(
             "target/async_arbitrary_bytes/log",
             RotationMode::Bytes(count),
@@ -672,12 +680,12 @@ mod tests {
         .unwrap();
 
         for _ in 0..count {
-            rot.write(b"0").await.unwrap();
+            rot.write_all(b"0").await.unwrap();
         }
 
         rot.flush().await.unwrap();
         assert!(!Path::new("target/async_arbitrary_bytes/log.0").exists());
-        rot.write(b"1").await.unwrap();
+        rot.write_all(b"1").await.unwrap();
         assert!(Path::new("target/async_arbitrary_bytes/log.0").exists());
 
         fs::remove_dir_all("target/async_arbitrary_bytes")
