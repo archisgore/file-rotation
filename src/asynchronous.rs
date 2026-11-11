@@ -25,9 +25,11 @@
 //!   let mut log = FileRotate::new("target/async-my-log-directory-lines/my-log-file", RotationMode::Lines(3), 2).await.unwrap();
 //!
 //!   // Write a bunch of lines
-//!   log.write("Line 1: Hello World!\n".as_bytes()).await;
+//!   log.write_all("Line 1: Hello World!\n".as_bytes()).await.unwrap();
+//!   log.flush().await.unwrap();
 //!   for idx in 2..11 {
-//!     log.write(format!("Line {}\n", idx).as_bytes()).await;
+//!     log.write_all(format!("Line {}\n", idx).as_bytes()).await.unwrap();
+//!     log.flush().await.unwrap();
 //!   }
 //!
 //!   assert_eq!("Line 10\n", fs::read_to_string("target/async-my-log-directory-lines/my-log-file").await.unwrap());
@@ -71,9 +73,11 @@
 //!   let mut log = FileRotate::new("target/async-my-log-directory-surpassed/my-log-file", RotationMode::BytesSurpassed(2), 2).await.unwrap();
 //!
 //!   // Write a bunch of lines
-//!   log.write("Line 1: Hello World!\n".as_bytes()).await;
+//!   log.write_all("Line 1: Hello World!\n".as_bytes()).await.unwrap();
+//!   log.flush().await.unwrap();
 //!   for idx in 2..11 {
-//!     log.write(format!("Line {}", idx).as_bytes()).await;
+//!     log.write_all(format!("Line {}", idx).as_bytes()).await.unwrap();
+//!     log.flush().await.unwrap();
 //!   }
 //!
 //!   // the latest file is empty - since the previous file surpassed bytes and was rotated out
@@ -102,7 +106,8 @@
 //!
 //!   let mut log = FileRotate::new("target/async-my-log-directory-bytes/my-log-file", RotationMode::Bytes(5), 2).await.unwrap();
 //!
-//!   log.write("Test file\n".as_bytes()).await;
+//!   log.write_all("Test file\n".as_bytes()).await.unwrap();
+//!   log.flush().await.unwrap();
 //!
 //!   assert_eq!("Test ", fs::read_to_string("target/async-my-log-directory-bytes/my-log-file.0").await.unwrap());
 //!   assert_eq!("file\n", fs::read_to_string("target/async-my-log-directory-bytes/my-log-file").await.unwrap());
@@ -128,25 +133,30 @@
 //!
 //!   let mut log = FileRotate::new("target/async-my-log-directory-small/my-log-file", RotationMode::Bytes(1), 3).await.unwrap();
 //!
-//!   log.write("A".as_bytes()).await;
+//!   log.write_all("A".as_bytes()).await.unwrap();
+//!   log.flush().await.unwrap();
 //!   assert_eq!("A", fs::read_to_string("target/async-my-log-directory-small/my-log-file").await.unwrap());
 //!
-//!   log.write("B".as_bytes()).await;
+//!   log.write_all("B".as_bytes()).await.unwrap();
+//!   log.flush().await.unwrap();
 //!   assert_eq!("A", fs::read_to_string("target/async-my-log-directory-small/my-log-file.0").await.unwrap());
 //!   assert_eq!("B", fs::read_to_string("target/async-my-log-directory-small/my-log-file").await.unwrap());
 //!
-//!   log.write("C".as_bytes()).await;
+//!   log.write_all("C".as_bytes()).await.unwrap();
+//!   log.flush().await.unwrap();
 //!   assert_eq!("A", fs::read_to_string("target/async-my-log-directory-small/my-log-file.0").await.unwrap());
 //!   assert_eq!("B", fs::read_to_string("target/async-my-log-directory-small/my-log-file.1").await.unwrap());
 //!   assert_eq!("C", fs::read_to_string("target/async-my-log-directory-small/my-log-file").await.unwrap());
 //!
-//!   log.write("D".as_bytes()).await;
+//!   log.write_all("D".as_bytes()).await.unwrap();
+//!   log.flush().await.unwrap();
 //!   assert_eq!("A", fs::read_to_string("target/async-my-log-directory-small/my-log-file.0").await.unwrap());
 //!   assert_eq!("B", fs::read_to_string("target/async-my-log-directory-small/my-log-file.1").await.unwrap());
 //!   assert_eq!("C", fs::read_to_string("target/async-my-log-directory-small/my-log-file.2").await.unwrap());
 //!   assert_eq!("D", fs::read_to_string("target/async-my-log-directory-small/my-log-file").await.unwrap());
 //!
-//!   log.write("E".as_bytes()).await;
+//!   log.write_all("E".as_bytes()).await.unwrap();
+//!   log.flush().await.unwrap();
 //!   assert_eq!("A", fs::read_to_string("target/async-my-log-directory-small/my-log-file.0").await.unwrap());
 //!   assert_eq!("B", fs::read_to_string("target/async-my-log-directory-small/my-log-file.1").await.unwrap());
 //!   assert_eq!("C", fs::read_to_string("target/async-my-log-directory-small/my-log-file.2").await.unwrap());
@@ -155,7 +165,8 @@
 //!
 //!
 //!   // Here we overwrite the 0 file since we're out of log files, restarting the sequencing
-//!   log.write("F".as_bytes()).await;
+//!   log.write_all("F".as_bytes()).await.unwrap();
+//!   log.flush().await.unwrap();
 //!   assert_eq!("E", fs::read_to_string("target/async-my-log-directory-small/my-log-file.0").await.unwrap());
 //!   assert_eq!("B", fs::read_to_string("target/async-my-log-directory-small/my-log-file.1").await.unwrap());
 //!   assert_eq!("C", fs::read_to_string("target/async-my-log-directory-small/my-log-file.2").await.unwrap());
