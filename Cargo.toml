@@ -1,13 +1,14 @@
 [package]
 name = "file-rotation"
 version = "0.4.2"
-authors = ["Kevin Robert Stravers <macocio@gmail.com>", "Archis Gore <archis@polyverse.com"]
+authors = ["Kevin Robert Stravers <macocio@gmail.com>", "Archis Gore <me@archisgore.com>"]
 edition = "2018"
 description = "Log rotation for files, supports synchronous std API and an asynchronous tokio-based API."
-homepage = "https://github.com/polyverse/file-rotation"
-repository = "https://github.com/polyverse/file-rotation"
-keywords= ["log", "rotate", "logrotate"]
+homepage = "https://github.com/archisgore/file-rotation"
+repository = "https://github.com/archisgore/file-rotation"
+keywords = ["log", "rotate", "logrotate"]
 license = "MIT"
+readme = "README.md"
 
 [features]
 default = ["async"]
